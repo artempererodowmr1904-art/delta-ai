@@ -1,14 +1,15 @@
 import os
 import telebot
+import requests
+import json
 from flask import Flask, request
-from gradio_client import Client
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
-# ССЫЛКИ НА ТВОИ SPACE
+# Ссылки на твои Space
 SPACES = [
-    "LejobuildYT/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive_GGUF-Q6_K_P",
-    "jickman125/Gemma4-31b-uncensored-assistant"
+    "https://lejobuildyt-qwen3-6-35b-a3b-uncensored-hauhaucs-aggressive-gguf-q6-k-p.hf.space/api/predict",
+    "https://jickman125-gemma4-31b-uncensored-assistant.hf.space/api/predict"
 ]
 
 dunder_name = "_" * 2 + "name" + "_" * 2
@@ -24,28 +25,31 @@ def chat(message):
     msg = bot.send_message(message.chat.id, "⏳ Думаю (это может занять 10-20 сек)...")
     
     ai_text = None
-    for space in SPACES:
+    for space_url in SPACES:
         try:
-            # Подключаемся к Space
-            client = Client(space)
-            # Отправляем запрос (интерфейс Gradio обычно принимает текст как первый аргумент)
-            result = client.predict(message.text, api_name="/predict")
+            # Формат запроса Gradio (может отличаться в разных версиях)
+            # Пробуем разные варианты
+            payloads = [
+                {"data": [message.text]},
+                {"data": [[message.text, None]]},
+                {"data": [message.text, 0.7, 1024]}
+            ]
             
-            # Gradio возвращает либо строку, либо словарь
-            if isinstance(result, str):
-                ai_text = result
-            elif isinstance(result, dict) and "response" in result:
-                ai_text = result["response"]
-            else:
-                ai_text = str(result)
-                
-            if ai_text: break # Если получили ответ, выходим из цикла
+            for payload in payloads:
+                r = requests.post(space_url, json=payload, timeout=60)
+                if r.status_code == 200:
+                    res = r.json()
+                    if "data" in res and len(res["data"]) > 0:
+                        ai_text = str(res["data"][0])
+                        break
+            
+            if ai_text: break
         except Exception as e:
-            print(f"Ошибка Space {space}: {e}")
+            print(f"Ошибка {space_url}: {e}")
             continue
             
     if not ai_text:
-        ai_text = "❌ Не удалось получить ответ ни от одного Space. Возможно, они спят или перегружены."
+        ai_text = "❌ Все Space спят или не отвечают. Попробуй позже или разбуди их на сайте Hugging Face."
         
     bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=ai_text[:4000])
 
@@ -64,7 +68,6 @@ def receive_update():
 if eval(dunder_name) == "_" * 2 + "main" + "_" * 2:
     RENDER_URL = "https://delta-ai-tep9.onrender.com" 
     
-    import requests
     requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook")
     webhook_url = f"{RENDER_URL}/{TELEGRAM_TOKEN}"
     requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}")
