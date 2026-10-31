@@ -1,16 +1,12 @@
 import os
 import telebot
-import requests
-import json
 from flask import Flask, request
+from gradio_client import Client
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 
-# Ссылки на твои Space
-SPACES = [
-    "https://lejobuildyt-qwen3-6-35b-a3b-uncensored-hauhaucs-aggressive-gguf-q6-k-p.hf.space/api/predict",
-    "https://jickman125-gemma4-31b-uncensored-assistant.hf.space/api/predict"
-]
+# Твой Space
+SPACE_NAME = "jickman125/Gemma4-31b-uncensored-assistant"
 
 dunder_name = "_" * 2 + "name" + "_" * 2
 app = Flask(eval(dunder_name))
@@ -18,40 +14,33 @@ bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 DèltaAI готов. Спрашивай (модель 35B без цензуры).")
+    bot.send_message(message.chat.id, "🤖 DèltaAI (Gemma 31B) готов. Спрашивай.")
 
 @bot.message_handler(func=lambda message: True)
 def chat(message):
-    msg = bot.send_message(message.chat.id, "⏳ Думаю (это может занять 10-20 сек)...")
+    msg = bot.send_message(message.chat.id, "⏳ Думаю (10-20 сек)...")
     
-    ai_text = None
-    for space_url in SPACES:
-        try:
-            # Формат запроса Gradio (может отличаться в разных версиях)
-            # Пробуем разные варианты
-            payloads = [
-                {"data": [message.text]},
-                {"data": [[message.text, None]]},
-                {"data": [message.text, 0.7, 1024]}
-            ]
-            
-            for payload in payloads:
-                r = requests.post(space_url, json=payload, timeout=60)
-                if r.status_code == 200:
-                    res = r.json()
-                    if "data" in res and len(res["data"]) > 0:
-                        ai_text = str(res["data"][0])
-                        break
-            
-            if ai_text: break
-        except Exception as e:
-            print(f"Ошибка {space_url}: {e}")
-            continue
-            
-    if not ai_text:
-        ai_text = "❌ Все Space спят или не отвечают. Попробуй позже или разбуди их на сайте Hugging Face."
+    try:
+        # Подключаемся к Space
+        client = Client(SPACE_NAME)
         
-    bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=ai_text[:4000])
+        # Отправляем запрос (Gradio обычно принимает текст первым аргументом)
+        # Если выдает ошибку, мы попробуем другой формат
+        try:
+            result = client.predict(message.text, api_name="/chat")
+        except:
+            result = client.predict(message.text)
+            
+        ai_text = str(result)
+        
+        # Чистим ответ от лишних скобок, если Gradio вернул кортеж
+        if ai_text.startswith("(") and ai_text.endswith(")"):
+            ai_text = ai_text[1:-1]
+            
+        bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=ai_text[:4000])
+        
+    except Exception as e:
+        bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=f"❌ Ошибка Space: {e}\n\nВозможно, он спит. Зайди на него в браузере и разбуди.")
 
 @app.route('/', methods=['GET'])
 def index():
@@ -68,6 +57,7 @@ def receive_update():
 if eval(dunder_name) == "_" * 2 + "main" + "_" * 2:
     RENDER_URL = "https://delta-ai-tep9.onrender.com" 
     
+    import requests
     requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook")
     webhook_url = f"{RENDER_URL}/{TELEGRAM_TOKEN}"
     requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}")
