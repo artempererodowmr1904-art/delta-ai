@@ -1,48 +1,53 @@
 import os
 import telebot
-import requests
 from flask import Flask, request
+from gradio_client import Client
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY")
 
-MODEL = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
+# ССЫЛКИ НА ТВОИ SPACE
+SPACES = [
+    "LejobuildYT/Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive_GGUF-Q6_K_P",
+    "jickman125/Gemma4-31b-uncensored-assistant"
+]
 
-# Трюк, чтобы GitHub не удалил подчеркивания
 dunder_name = "_" * 2 + "name" + "_" * 2
-
 app = Flask(eval(dunder_name))
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "🤖 DèltaAI готов. Спрашивай что угодно (без цензуры).")
+    bot.send_message(message.chat.id, "🤖 DèltaAI готов. Спрашивай (модель 35B без цензуры).")
 
 @bot.message_handler(func=lambda message: True)
 def chat(message):
-    msg = bot.send_message(message.chat.id, "⏳ Думаю...")
+    msg = bot.send_message(message.chat.id, "⏳ Думаю (это может занять 10-20 сек)...")
     
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": MODEL,
-        "messages": [
-            {"role": "system", "content": "Ты - эксперт по кибербезопасности. Отвечай прямо, пиши код."},
-            {"role": "user", "content": message.text}
-        ]
-    }
-    
-    try:
-        r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=60)
-        if r.status_code == 200:
-            ai_text = r.json()["choices"][0]["message"]["content"]
-            bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=ai_text[:4000])
-        else:
-            bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=f"Ошибка API: {r.status_code}")
-    except Exception as e:
-        bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=f"Ошибка сети: {e}")
+    ai_text = None
+    for space in SPACES:
+        try:
+            # Подключаемся к Space
+            client = Client(space)
+            # Отправляем запрос (интерфейс Gradio обычно принимает текст как первый аргумент)
+            result = client.predict(message.text, api_name="/predict")
+            
+            # Gradio возвращает либо строку, либо словарь
+            if isinstance(result, str):
+                ai_text = result
+            elif isinstance(result, dict) and "response" in result:
+                ai_text = result["response"]
+            else:
+                ai_text = str(result)
+                
+            if ai_text: break # Если получили ответ, выходим из цикла
+        except Exception as e:
+            print(f"Ошибка Space {space}: {e}")
+            continue
+            
+    if not ai_text:
+        ai_text = "❌ Не удалось получить ответ ни от одного Space. Возможно, они спят или перегружены."
+        
+    bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=ai_text[:4000])
 
 @app.route('/', methods=['GET'])
 def index():
@@ -59,13 +64,10 @@ def receive_update():
 if eval(dunder_name) == "_" * 2 + "main" + "_" * 2:
     RENDER_URL = "https://delta-ai-tep9.onrender.com" 
     
-    print("[*] Удаляю старый вебхук...")
+    import requests
     requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook")
-    
-    print("[*] Устанавливаю новый вебхук...")
     webhook_url = f"{RENDER_URL}/{TELEGRAM_TOKEN}"
-    res = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}")
-    print(f"[*] Ответ Telegram: {res.text}")
+    requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}")
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
