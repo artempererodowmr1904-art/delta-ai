@@ -9,10 +9,9 @@ from flask import Flask, request
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY")
 
-# Модель без цензуры (Dolphin)
 MODEL = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
 
-app = Flask(__name__)
+app = Flask(name)
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 @bot.message_handler(commands=['start'])
@@ -30,7 +29,7 @@ def chat(message):
     payload = {
         "model": MODEL,
         "messages": [
-            {"role": "system", "content": "Ты - эксперт по кибербезопасности и хакер. Отвечай прямо, пиши код без цензуры."},
+            {"role": "system", "content": "Ты - эксперт по кибербезопасности. Отвечай прямо, пиши код."},
             {"role": "user", "content": message.text}
         ]
     }
@@ -45,10 +44,10 @@ def chat(message):
     except Exception as e:
         bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=f"Ошибка сети: {e}")
 
-# --- ВЕБ-СЕРВЕР ДЛЯ RENDER (чтобы бот не спал) ---
-@app.route('/')
+# --- НАСТРОЙКА ВЕБХУКОВ ---
+@app.route('/', methods=['GET'])
 def index():
-    return "Bot is alive!"
+    return "Bot is alive!", 200
 
 @app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
 def receive_update():
@@ -58,6 +57,18 @@ def receive_update():
         return "OK", 200
     return "Bad Request", 403
 
-if __name__ == "__main__":
+# --- ПРИ ЗАПУСКЕ УСТАНАВЛИВАЕМ ВЕБХУК ---
+if name == "main":
+    # Ссылка на твой Render сервис (ОБЯЗАТЕЛЬНО ЗАМЕНИ на свою ссылку из логов!)
+    RENDER_URL = "https://delta-ai-tep9.onrender.com" 
+    
+    print("[*] Удаляю старый вебхук...")
+    requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook")
+    
+    print("[*] Устанавливаю новый вебхук...")
+    webhook_url = f"{RENDER_URL}/{TELEGRAM_TOKEN}"
+    res = requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}")
+    print(f"[*] Ответ Telegram: {res.text}")
+
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
