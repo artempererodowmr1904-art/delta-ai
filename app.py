@@ -3,15 +3,15 @@ import telebot
 import requests
 from flask import Flask, request
 
-# ==========================================
-#  НАСТРОЙКИ (Берутся из переменных окружения Render)
-# ==========================================
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY")
 
 MODEL = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
 
-app = Flask(name)
+# Трюк, чтобы GitHub не удалил подчеркивания
+dunder_name = "_" * 2 + "name" + "_" * 2
+
+app = Flask(eval(dunder_name))
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 @bot.message_handler(commands=['start'])
@@ -44,7 +44,6 @@ def chat(message):
     except Exception as e:
         bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=f"Ошибка сети: {e}")
 
-# --- НАСТРОЙКА ВЕБХУКОВ ---
 @app.route('/', methods=['GET'])
 def index():
     return "Bot is alive!", 200
@@ -57,9 +56,7 @@ def receive_update():
         return "OK", 200
     return "Bad Request", 403
 
-# --- ПРИ ЗАПУСКЕ УСТАНАВЛИВАЕМ ВЕБХУК ---
-if name == "main":
-    # Ссылка на твой Render сервис (ОБЯЗАТЕЛЬНО ЗАМЕНИ на свою ссылку из логов!)
+if eval(dunder_name) == "_" * 2 + "main" + "_" * 2:
     RENDER_URL = "https://delta-ai-tep9.onrender.com" 
     
     print("[*] Удаляю старый вебхук...")
