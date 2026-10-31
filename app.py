@@ -12,7 +12,7 @@ OPENROUTER_KEY = os.environ.get("OPENROUTER_KEY")
 # Модель без цензуры (Dolphin)
 MODEL = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"
 
-app = Flask(name)
+app = Flask(__name__)
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
 @bot.message_handler(commands=['start'])
