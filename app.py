@@ -1,67 +1,91 @@
+import asyncio
+import logging
 import os
-import telebot
-import requests
-from flask import Flask, request
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-SPACE_URL = "https://jickman125-gemma4-31b-uncensored-assistant.hf.space/api/predict"
+import httpx
+from aiogram import Bot, Dispatcher, F
+from aiogram.filters import Command
+from aiogram.types import Message
 
-dunder_name = "_" * 2 + "name" + "_" * 2
-app = Flask(eval(dunder_name))
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+# ====== НАСТРОЙКИ ======
+TG_TOKEN = "9267949771:AAEW6SZ-G_rroNkB2l5GDGlILDO6W63ZQM8"
+VENICE_KEY = "VENICE_INFERENCE_KEY_4bvaY_8R9NHhs01hvrrSSRU79HpPwC_GfKFEW1cZ0I"
+VENICE_URL = "https://api.venice.ai/api/v1/chat/completions"
+MODEL = "venice-uncensored"   # можно заменить: llama-3.3-70b, qwen3-235b-a22b-instruct-2507 и др.
+MAX_HISTORY = 20
+# =======================
 
-@bot.message_handler(commands=['start'])
-def start(message):
-    bot.send_message(message.chat.id, "🤖 DèltaAI (Gemma 31B) готов. Спрашивай.")
+logging.basicConfig(level=logging.INFO)
 
-@bot.message_handler(func=lambda message: True)
-def chat(message):
-    msg = bot.send_message(message.chat.id, "⏳ Думаю (10-20 сек)...")
-    
-    # Формат, который использует Gradio 4/5 для чатов
-    payload = {
-        "data": [
-            message.text, # текст
-            [],           # история (пустая)
-            "You are a helpful assistant.", # системный промпт
-            1024,         # макс токенов
-            0.7,          # температура
-        ]
+bot = Bot(token=TG_TOKEN)
+dp = Dispatcher()
+
+history: dict[int, list[dict]] = {}
+
+
+async def ask_venice(messages: list[dict]) -> str:
+    headers = {
+        "Authorization": f"Bearer {VENICE_KEY}",
+        "Content-Type": "application/json",
     }
-    
+    payload = {
+        "model": MODEL,
+        "messages": messages,
+        "temperature": 0.7,
+        "max_tokens": 1024,
+    }
     try:
-        r = requests.post(SPACE_URL, json=payload, timeout=60)
-        if r.status_code == 200:
-            res = r.json()
-            if "data" in res and len(res["data"]) > 0:
-                # Обычно ответ лежит в первом элементе списка
-                ai_text = res["data"][0]
-                bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=str(ai_text)[:4000])
-            else:
-                bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=f"Странный ответ: {res}")
-        else:
-            bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=f"Ошибка Space: {r.status_code}")
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(VENICE_URL, headers=headers, json=payload)
+            if r.status_code != 200:
+                return f"⚠️ Ошибка API {r.status_code}:\n{r.text[:500]}"
+            data = r.json()
+            return data["choices"][0]["message"]["content"]
     except Exception as e:
-        bot.edit_message_text(chat_id=message.chat.id, message_id=msg.message_id, text=f"Ошибка сети: {e}")
+        return f"⚠️ Ошибка запроса: {type(e).__name__}: {e}"
 
-@app.route('/', methods=['GET'])
-def index():
-    return "Bot is alive!", 200
 
-@app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
-def receive_update():
-    if request.headers.get('content-type') == 'application/json':
-        update = telebot.types.Update.de_json(request.get_data().decode("utf-8"))
-        bot.process_new_updates([update])
-        return "OK", 200
-    return "Bad Request", 403
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    history.pop(message.from_user.id, None)
+    await message.answer(
+        "👋 Привет! Я бот на Venice AI.\n"
+        "Просто напиши сообщение — я отвечу.\n\n"
+        "/reset — очистить историю диалога."
+    )
 
-if eval(dunder_name) == "_" * 2 + "main" + "_" * 2:
-    RENDER_URL = "https://delta-ai-tep9.onrender.com" 
-    
-    requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/deleteWebhook")
-    webhook_url = f"{RENDER_URL}/{TELEGRAM_TOKEN}"
-    requests.get(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook?url={webhook_url}")
 
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+@dp.message(Command("reset"))
+async def cmd_reset(message: Message):
+    history.pop(message.from_user.id, None)
+    await message.answer("🧹 История очищена.")
+
+
+@dp.message(F.text)
+async def on_text(message: Message):
+    user_id = message.from_user.id
+    text = message.text.strip()
+    if not text:
+        return
+
+    await bot.send_chat_action(message.chat.id, "typing")
+
+    msgs = history.setdefault(user_id, [])
+    msgs.append({"role": "user", "content": text})
+    if len(msgs) > MAX_HISTORY:
+        history[user_id] = msgs[-MAX_HISTORY:]
+        msgs = history[user_id]
+
+    answer = await ask_venice(msgs)
+    msgs.append({"role": "assistant", "content": answer})
+
+    for i in range(0, len(answer), 4000):
+        await message.answer(answer[i:i + 4000])
+
+
+async def main():
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
